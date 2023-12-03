@@ -900,10 +900,11 @@ int hmdfs_send_setxattr(struct hmdfs_peer *con, const char *send_buf,
 	req->flags = cpu_to_le32(flags);
 	strncpy(req->buf, send_buf, path_len);
 	strncpy(req->buf + path_len + 1, name, name_len);
-	if (!value) {
-		memcpy(req->buf + path_len + name_len + 2, value, size);
+	if (!value)
 		req->del = true;
-	}
+	else
+		memcpy(req->buf + path_len + name_len + 2, value, size);
+
 	ret = hmdfs_sendmessage_request(con, &sm);
 	kfree(req);
 	return ret;
@@ -1086,7 +1087,6 @@ static struct hmdfs_node_cb_desc client_cb[] = {
 	{
 		.evt = NODE_EVT_OFFLINE,
 		.sync = true,
-		.min_version = DFS_1_0,
 		.fn = hmdfs_client_offline_notify,
 	},
 };

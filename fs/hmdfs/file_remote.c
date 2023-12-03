@@ -888,7 +888,7 @@ loff_t hmdfs_set_pos(unsigned long dev_id, unsigned long group_id,
 	return pos;
 }
 
-static int analysis_dentry_file_from_con(struct hmdfs_sb_info *sbi,
+int analysis_dentry_file_from_con(struct hmdfs_sb_info *sbi,
 					 struct file *file,
 					 struct file *handler,
 					 struct dir_context *ctx)
@@ -946,6 +946,9 @@ static int analysis_dentry_file_from_con(struct hmdfs_sb_info *sbi,
 			else if (S_ISREG(le16_to_cpu(
 					 dentry_group->nsl[j].i_mode)))
 				file_type = DT_REG;
+			else if (S_ISLNK(le16_to_cpu(
+					 dentry_group->nsl[j].i_mode)))
+				file_type = DT_LNK;
 
 			strncat(dentry_name, dentry_group->filename[j], len);
 			pos = hmdfs_set_pos(dev_id, i, j);
@@ -994,7 +997,7 @@ static int hmdfs_iterate_remote(struct file *file, struct dir_context *ctx)
 	con = hmdfs_lookup_from_devid(file->f_inode->i_sb->s_fs_info, dev_id);
 	if (con) {
 		// ctx->pos = 0;
-		err = con->conn_operations->remote_readdir(con, file, ctx);
+		err = hmdfs_dev_readdir_from_con(con, file, ctx);
 		if (unlikely(!con)) {
 			hmdfs_err("con is null");
 			goto done;
@@ -1018,9 +1021,7 @@ int hmdfs_dir_open_remote(struct inode *inode, struct file *file)
 	struct hmdfs_inode_info *info = hmdfs_i(inode);
 	struct clearcache_item *cache_item = NULL;
 
-	if (info->conn && info->conn->version <= USERSPACE_MAX_VER) {
-		return 0;
-	} else if (info->conn) {
+	if (info->conn) {
 		if (!hmdfs_cache_revalidate(READ_ONCE(info->conn->conn_time),
 					    info->conn->device_id,
 					    file->f_path.dentry))

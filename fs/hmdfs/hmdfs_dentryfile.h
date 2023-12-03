@@ -292,6 +292,7 @@ int hmdfs_metainfo_read(struct hmdfs_sb_info *sbi, struct file *filp,
 
 bool get_remote_dentry_file(struct dentry *dentry, struct hmdfs_peer *con);
 void get_remote_dentry_file_sync(struct dentry *dentry, struct hmdfs_peer *con);
+int  get_cloud_cache_file(struct dentry *dentry, struct hmdfs_sb_info *sbi);
 
 void release_cache_item(struct kref *ref);
 void remove_cache_item(struct clearcache_item *item);
@@ -339,4 +340,8 @@ static inline bool cache_item_revalidate(unsigned long conn_time,
 	       time_before_eq(conn_time, item_time);
 }
 
+__u32 hmdfs_dentry_hash(const struct qstr *qstr, bool case_sense);
+__u64 get_bucketaddr(unsigned int level, __u64 buckoffset);
+__u64 get_bucket_by_level(unsigned int level);
+unsigned int get_max_depth(struct file *filp);
 #endif

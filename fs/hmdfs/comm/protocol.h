@@ -144,16 +144,9 @@ struct slice_descriptor {
 } __packed;
 
 enum DFS_VERSION {
-	INVALID_VERSION = 0,
-	DFS_1_0,
-
-	USERSPACE_MAX_VER = 0x3F,
-	DFS_2_0,
-
+	HMDFS_VERSION = 0x40,
 	MAX_VERSION = 0xFF
 };
-
-enum CONN_OPERATIONS_VERSION { USERDFS_VERSION, PROTOCOL_VERSION };
 
 enum CMD_FLAG { C_REQUEST = 0, C_RESPONSE = 1, C_FLAG_SIZE };
 
@@ -177,15 +170,15 @@ enum FILE_CMD {
 	F_STATFS = 16,
 	F_CONNECT_REKEY = 17,
 	F_DROP_PUSH = 18,
-	F_RESERVED_0 = 19,
+	F_RESERVED_6 = 19,
 	F_GETATTR = 20,
 	F_FSYNC = 21,
 	F_SYNCFS = 22,
 	F_GETXATTR = 23,
 	F_SETXATTR = 24,
 	F_LISTXATTR = 25,
-	F_READPAGES = 26,
-	F_READPAGES_OPEN = 27,
+	F_RESERVED_7 = 26,
+	F_RESERVED_8 = 27,
 	F_ATOMIC_OPEN = 28,
 	F_SIZE,
 };
@@ -258,35 +251,6 @@ struct readpage_request {
 } __packed;
 
 struct readpage_response {
-	char buf[0];
-} __packed;
-
-struct readpages_request {
-	__le64 file_ver;
-	__le32 file_id;
-	__le32 size;
-	__le64 index;
-	__le64 reserved;
-} __packed;
-
-struct readpages_response {
-	char buf[0];
-} __packed;
-
-struct readpages_open_request {
-	__u8 file_type;
-	__u8 reserved1[3];
-	__le32 flags;
-	__le32 path_len;
-	__le32 size;
-	__le64 index;
-	__le64 reserved2;
-	char buf[0];
-} __packed;
-
-struct readpages_open_response {
-	struct open_response open_resp;
-	__le64 reserved[4];
 	char buf[0];
 } __packed;
 

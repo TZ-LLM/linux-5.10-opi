@@ -169,6 +169,7 @@ out:
 
 static void hmdfs_dev_d_release(struct dentry *dentry)
 {
+	struct clearcache_item *item;
 	if (!dentry || !dentry->d_fsdata)
 		return;
 
@@ -184,6 +185,17 @@ static void hmdfs_dev_d_release(struct dentry *dentry)
 	case HMDFS_LAYER_FIRST_DEVICE:
 		break;
 	case HMDFS_LAYER_SECOND_REMOTE:
+		hmdfs_clear_cache_dents(dentry, false);
+		break;
+	case HMDFS_LAYER_SECOND_CLOUD:
+		item = hmdfs_find_cache_item(CLOUD_DEVICE, dentry);
+		if (item) {
+			/* cloud dentryfile didn't link to
+			   'struct cache_file_node', so close file here.
+			 */
+			filp_close(item->filp, NULL);
+			kref_put(&item->ref, release_cache_item);
+		}
 		hmdfs_clear_cache_dents(dentry, false);
 		break;
 	default:
@@ -277,6 +289,8 @@ static int d_revalidate_merge(struct dentry *direntry, unsigned int flags)
 	struct hmdfs_dentry_comrade *comrade = NULL;
 	struct dentry *parent_dentry = NULL;
 	struct dentry *lower_cur_parent_dentry = NULL;
+	struct inode *dinode = NULL;
+	struct hmdfs_inode_info *info = NULL;
 	int ret = 1;
 
 	if (flags & LOOKUP_RCU) {
@@ -286,6 +300,14 @@ static int d_revalidate_merge(struct dentry *direntry, unsigned int flags)
 	if (flags & (LOOKUP_CREATE | LOOKUP_RENAME_TARGET | LOOKUP_REVAL)) {
 		return 0;
 	}
+
+	dinode = d_inode(direntry);
+	if (!dinode)
+		return 0;
+
+	info = hmdfs_i(dinode);
+	if (info->inode_type == HMDFS_LAYER_FIRST_MERGE_CLOUD)
+		return 1;
 
 	parent_dentry = dget_parent(direntry);
         mutex_lock(&dim->comrade_list_lock);

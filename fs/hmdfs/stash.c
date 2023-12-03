@@ -1261,7 +1261,7 @@ static int hmdfs_open_restore_dst_file(struct hmdfs_file_restore_ctx *ctx,
 		goto out;
 
 	/* Error comes from connection or server ? */
-	dst = file_open_root(ctx->dst_root_path.dentry,ctx->dst_root_path.mnt,
+	dst = file_open_root(ctx->dst_root_path.dentry, ctx->dst_root_path.mnt,
 			     ctx->dst, O_LARGEFILE | rw_flag, 0);
 	if (IS_ERR(dst)) {
 		err = PTR_ERR(dst);
@@ -2179,7 +2179,7 @@ hmdfs_need_rebuild_inode_stash_status(struct hmdfs_peer *conn, umode_t mode)
 {
 	return hmdfs_is_stash_enabled(conn->sbi) &&
 	       READ_ONCE(conn->need_rebuild_stash_list) &&
-	       S_ISREG(mode);
+	       (S_ISREG(mode) || S_ISLNK(mode));
 }
 
 void hmdfs_remote_init_stash_status(struct hmdfs_peer *conn,
@@ -2205,16 +2205,13 @@ static struct hmdfs_node_cb_desc stash_cb[] = {
 	{
 		.evt = NODE_EVT_OFFLINE,
 		.sync = true,
-		.min_version = DFS_2_0,
 		.fn = hmdfs_stash_offline_prepare,
 	},
 	{
 		.evt = NODE_EVT_OFFLINE,
 		.sync = false,
-		.min_version = DFS_2_0,
 		.fn = hmdfs_stash_offline_do_stash,
 	},
-	/* Don't known peer version yet, so min_version is 0 */
 	{
 		.evt = NODE_EVT_ADD,
 		.sync = true,
@@ -2223,19 +2220,16 @@ static struct hmdfs_node_cb_desc stash_cb[] = {
 	{
 		.evt = NODE_EVT_ONLINE,
 		.sync = false,
-		.min_version = DFS_2_0,
 		.fn = hmdfs_stash_online_prepare,
 	},
 	{
 		.evt = NODE_EVT_ONLINE,
 		.sync = false,
-		.min_version = DFS_2_0,
 		.fn = hmdfs_stash_online_do_restore,
 	},
 	{
 		.evt = NODE_EVT_DEL,
 		.sync = true,
-		.min_version = DFS_2_0,
 		.fn = hmdfs_stash_del_do_cleanup,
 	},
 };

@@ -50,6 +50,7 @@ int init_hmdfs_dentry_info(struct hmdfs_sb_info *sbi, struct dentry *dentry,
 	if (dentry_type == HMDFS_LAYER_ZERO ||
 	    dentry_type == HMDFS_LAYER_FIRST_DEVICE ||
 	    dentry_type == HMDFS_LAYER_SECOND_LOCAL ||
+	    dentry_type == HMDFS_LAYER_SECOND_CLOUD ||
 	    dentry_type == HMDFS_LAYER_SECOND_REMOTE)
 		d_set_d_op(dentry, &hmdfs_dev_dops);
 	else
@@ -102,6 +103,9 @@ struct inode *fill_inode_local(struct super_block *sb,
 	else if (S_ISREG(lower_inode->i_mode))
 		inode->i_mode = (lower_inode->i_mode & S_IFMT) | S_IRUSR |
 				S_IWUSR | S_IRGRP | S_IWGRP;
+	else if (S_ISLNK(lower_inode->i_mode))
+		inode->i_mode =
+			S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
 
 #ifdef CONFIG_HMDFS_FS_PERMISSION
 	inode->i_uid = lower_inode->i_uid;
@@ -123,6 +127,10 @@ struct inode *fill_inode_local(struct super_block *sb,
 	} else if (S_ISREG(lower_inode->i_mode)) {
 		inode->i_op = &hmdfs_file_iops_local;
 		inode->i_fop = &hmdfs_file_fops_local;
+	} else if (S_ISLNK(lower_inode->i_mode)) {
+		inode->i_op = &hmdfs_symlink_iops_local;
+		inode->i_fop = &hmdfs_file_fops_local;
+		inode->i_size = i_size_read(lower_inode);
 	} else {
 		ret = -EIO;
 		goto bad_inode;
@@ -216,6 +224,11 @@ out:
 	return err;
 }
 
+static inline void set_symlink_flag(struct hmdfs_dentry_info *gdi)
+{
+	gdi->file_type = HM_SYMLINK;
+}
+
 struct dentry *hmdfs_lookup_local(struct inode *parent_inode,
 				  struct dentry *child_dentry,
 				  unsigned int flags)
@@ -261,6 +274,8 @@ struct dentry *hmdfs_lookup_local(struct inode *parent_inode,
 					       d_inode(lower_path.dentry),
 						   child_dentry->d_name.name);
 
+		if (S_ISLNK(d_inode(lower_path.dentry)->i_mode))
+			set_symlink_flag(gdi);
 		if (IS_ERR(child_inode)) {
 			err = PTR_ERR(child_inode);
 			ret = ERR_PTR(err);
@@ -486,6 +501,7 @@ int hmdfs_rmdir_local_dentry(struct inode *dir, struct dentry *dentry)
 	kuid_t tmp_uid;
 	struct path lower_path;
 	struct dentry *lower_dentry = NULL;
+	struct dentry *lookup_dentry = NULL;
 	int error = 0;
 
 	hmdfs_clear_cache_dents(dentry, true);
@@ -493,10 +509,20 @@ int hmdfs_rmdir_local_dentry(struct inode *dir, struct dentry *dentry)
 	lower_dentry = lower_path.dentry;
 	lower_dir_dentry = lock_parent(lower_dentry);
 	lower_dir = d_inode(lower_dir_dentry);
+
+	lookup_dentry = lookup_one_len(lower_dentry->d_name.name, lower_dir_dentry,
+				       lower_dentry->d_name.len);
+	if (IS_ERR(lookup_dentry)) {
+		error = PTR_ERR(lookup_dentry);
+		hmdfs_err("lookup_one_len failed, err = %d", error);
+		goto lookup_err;
+	}
 	tmp_uid = hmdfs_override_inode_uid(lower_dir);
 
-	error = vfs_rmdir(lower_dir, lower_dentry);
+	error = vfs_rmdir(lower_dir, lookup_dentry);
 	hmdfs_revert_inode_uid(lower_dir, tmp_uid);
+	dput(lookup_dentry);
+lookup_err:
 	unlock_dir(lower_dir_dentry);
 	hmdfs_put_lower_path(&lower_path);
 	if (error)
@@ -536,10 +562,11 @@ out:
 
 int hmdfs_unlink_local_dentry(struct inode *dir, struct dentry *dentry)
 {
-	struct inode *lower_dir = hmdfs_i(dir)->lower_inode;
 	struct dentry *lower_dir_dentry = NULL;
 	struct path lower_path;
+	struct inode *lower_dir = NULL;
 	struct dentry *lower_dentry = NULL;
+	struct dentry *lookup_dentry = NULL;
 	int error;
 	kuid_t tmp_uid;
 
@@ -547,11 +574,22 @@ int hmdfs_unlink_local_dentry(struct inode *dir, struct dentry *dentry)
 	lower_dentry = lower_path.dentry;
 	dget(lower_dentry);
 	lower_dir_dentry = lock_parent(lower_dentry);
+	lower_dir = d_inode(lower_dir_dentry);
+	lookup_dentry = lookup_one_len(lower_dentry->d_name.name, lower_dir_dentry,
+				       lower_dentry->d_name.len);
+	if (IS_ERR(lookup_dentry)) {
+		error = PTR_ERR(lookup_dentry);
+		hmdfs_err("lookup_one_len failed, err = %d", error);
+		goto lookup_err;
+	}
+
 	tmp_uid = hmdfs_override_inode_uid(lower_dir);
-	error = vfs_unlink(lower_dir, lower_dentry, NULL);
+	error = vfs_unlink(lower_dir, lookup_dentry, NULL);
 	hmdfs_revert_inode_uid(lower_dir, tmp_uid);
 	set_nlink(d_inode(dentry),
 		  hmdfs_i(d_inode(dentry))->lower_inode->i_nlink);
+	dput(lookup_dentry);
+lookup_err:
 	unlock_dir(lower_dir_dentry);
 	dput(lower_dentry);
 	if (error)
@@ -611,8 +649,8 @@ int hmdfs_rename_local_dentry(struct inode *old_dir, struct dentry *old_dentry,
 	lower_old_dir_dentry = dget_parent(lower_old_dentry);
 	lower_new_dir_dentry = dget_parent(lower_new_dentry);
 	trap = lock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
-	old_dir_uid = hmdfs_override_inode_uid(d_inode(lower_old_dir_dentry));
 	new_dir_uid = hmdfs_override_inode_uid(d_inode(lower_new_dir_dentry));
+	old_dir_uid = hmdfs_override_inode_uid(d_inode(lower_old_dir_dentry));
 
 	/* source should not be ancestor of target */
 	if (trap == lower_old_dentry) {
@@ -672,6 +710,17 @@ int hmdfs_rename_local(struct inode *old_dir, struct dentry *old_dentry,
 		goto rename_out;
 	}
 
+	if (hmdfs_i(old_dir)->inode_type != hmdfs_i(new_dir)->inode_type) {
+		hmdfs_err("in different view");
+		err = -EPERM;
+		goto rename_out;
+	}
+
+	if (hmdfs_d(old_dentry)->device_id != hmdfs_d(new_dentry)->device_id) {
+		err = -EXDEV;
+		goto rename_out;
+	}
+
 	if (S_ISREG(old_dentry->d_inode->i_mode)) {
 		err = hmdfs_rename_local_dentry(old_dir, old_dentry, new_dir,
 						new_dentry, flags);
@@ -689,6 +738,137 @@ int hmdfs_rename_local(struct inode *old_dir, struct dentry *old_dentry,
 
 rename_out:
 	return err;
+}
+
+static bool symname_is_allowed(const char *symname)
+{
+	char *p;
+	char *buf = 0;
+	size_t symname_len;
+
+	symname_len = strnlen(symname, PATH_MAX);
+	if (symname_len >= PATH_MAX)
+		return false;
+
+	buf = kzalloc(PATH_MAX + 2, GFP_KERNEL);
+	if (!buf)
+		return false;
+
+	buf[0] = '/';
+	strncpy(buf + 1, symname, symname_len);
+	strcat(buf, "/");
+	p = strstr(symname, "/../");
+	if (p) {
+		kfree(buf);	
+		return false;
+	}
+
+	kfree(buf);
+	return true;
+}
+
+int hmdfs_symlink_local(struct inode *dir, struct dentry *dentry,
+			const char *symname)
+{
+	int err;
+	struct dentry *lower_dentry = NULL;
+	struct dentry *lower_parent_dentry = NULL;
+	struct path lower_path;
+	struct inode *child_inode = NULL;
+	struct inode *lower_dir_inode = hmdfs_i(dir)->lower_inode;
+	struct hmdfs_dentry_info *gdi = hmdfs_d(dentry);
+	kuid_t tmp_uid;
+#ifdef CONFIG_HMDFS_FS_PERMISSION
+	const struct cred *saved_cred = NULL;
+	struct fs_struct *saved_fs = NULL, *copied_fs = NULL;
+	__u16 child_perm;
+#endif
+
+	if (unlikely(!symname_is_allowed(symname))) {
+		err = -EPERM;
+		goto path_err;
+	}
+
+#ifdef CONFIG_HMDFS_FS_PERMISSION
+	saved_cred = hmdfs_override_file_fsids(dir, &child_perm);
+	if (!saved_cred) {
+		err = -ENOMEM;
+		goto path_err;
+	}
+
+	saved_fs = current->fs;
+	copied_fs = hmdfs_override_fsstruct(saved_fs);
+	if (!copied_fs) {
+		err = -ENOMEM;
+		goto revert_fsids;
+	}
+#endif
+	hmdfs_get_lower_path(dentry, &lower_path);
+	lower_dentry = lower_path.dentry;
+	lower_parent_dentry = lock_parent(lower_dentry);
+	tmp_uid = hmdfs_override_inode_uid(lower_dir_inode);
+	err = vfs_symlink(lower_dir_inode, lower_dentry, symname);
+	hmdfs_revert_inode_uid(lower_dir_inode, tmp_uid);
+	unlock_dir(lower_parent_dentry);
+	if (err)
+		goto out_err;
+	set_symlink_flag(gdi);
+#ifdef CONFIG_HMDFS_FS_PERMISSION
+	err = hmdfs_persist_perm(lower_dentry, &child_perm);
+#endif
+	child_inode = fill_inode_local(dir->i_sb, d_inode(lower_dentry),
+				       dentry->d_name.name);
+	if (IS_ERR(child_inode)) {
+		err = PTR_ERR(child_inode);
+		goto out_err;
+	}
+	d_add(dentry, child_inode);
+	fsstack_copy_attr_times(dir, lower_dir_inode);
+	fsstack_copy_inode_size(dir, lower_dir_inode);
+
+out_err:
+	hmdfs_put_lower_path(&lower_path);
+#ifdef CONFIG_HMDFS_FS_PERMISSION
+	hmdfs_revert_fsstruct(saved_fs, copied_fs);
+revert_fsids:
+	hmdfs_revert_fsids(saved_cred);
+#endif
+path_err:
+	return err;
+}
+
+static const char *hmdfs_get_link_local(struct dentry *dentry,
+					struct inode *inode,
+					struct delayed_call *done)
+{
+	const char *link = NULL;
+	struct dentry *lower_dentry = NULL;
+	struct inode *lower_inode = NULL;
+	struct path lower_path;
+
+	if(!dentry) {
+		hmdfs_err("dentry MULL");
+		link = ERR_PTR(-ECHILD);
+		goto link_out;
+	}
+
+	hmdfs_get_lower_path(dentry, &lower_path);
+	lower_dentry = lower_path.dentry;
+	lower_inode = d_inode(lower_dentry);
+	if(!lower_inode->i_op || !lower_inode->i_op->get_link) {
+		hmdfs_err("The lower inode doesn't support get_link i_op");
+		link = ERR_PTR(-EINVAL);
+		goto out;
+	}
+
+	link = lower_inode->i_op->get_link(lower_dentry, lower_inode, done);
+	if(IS_ERR_OR_NULL(link))
+		goto out;
+	fsstack_copy_attr_atime(inode, lower_inode);
+out:
+	hmdfs_put_lower_path(&lower_path);
+link_out:
+	return link;
 }
 
 static int hmdfs_setattr_local(struct dentry *dentry, struct iattr *ia)
@@ -858,10 +1038,17 @@ const struct inode_operations hmdfs_dir_inode_ops_local = {
 	.create = hmdfs_create_local,
 	.rmdir = hmdfs_rmdir_local,
 	.unlink = hmdfs_unlink_local,
+	.symlink = hmdfs_symlink_local,
 	.rename = hmdfs_rename_local,
 	.permission = hmdfs_permission,
 	.setattr = hmdfs_setattr_local,
 	.getattr = hmdfs_getattr_local,
+};
+
+const struct inode_operations hmdfs_symlink_iops_local = {
+	.get_link = hmdfs_get_link_local,
+	.permission = hmdfs_permission,
+	.setattr = hmdfs_setattr_local,
 };
 
 const struct inode_operations hmdfs_dir_inode_ops_share = {

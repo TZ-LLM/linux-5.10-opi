@@ -53,7 +53,7 @@ struct dentry *hmdfs_get_lo_d(struct dentry *dentry, int dev_id)
 	return d;
 }
 
-static void update_inode_attr(struct inode *inode, struct dentry *child_dentry)
+void update_inode_attr(struct inode *inode, struct dentry *child_dentry)
 {
 	struct inode *li = NULL;
 	struct hmdfs_dentry_info_merge *cdi = hmdfs_dm(child_dentry);
@@ -82,7 +82,7 @@ static void update_inode_attr(struct inode *inode, struct dentry *child_dentry)
 	mutex_unlock(&cdi->comrade_list_lock);
 }
 
-static int get_num_comrades(struct dentry *dentry)
+int get_num_comrades(struct dentry *dentry)
 {
 	struct list_head *pos;
 	struct hmdfs_dentry_info_merge *dim = hmdfs_dm(dentry);
@@ -206,8 +206,8 @@ void link_comrade(struct list_head *onstack_comrades_head,
  * We tend to setup a local list of all the comrades we found and place the
  * list onto the dentry_info to achieve atomicity.
  */
-static void assign_comrades_unlocked(struct dentry *child_dentry,
-				     struct list_head *onstack_comrades_head)
+void assign_comrades_unlocked(struct dentry *child_dentry,
+			      struct list_head *onstack_comrades_head)
 {
 	struct hmdfs_dentry_info_merge *cdi = hmdfs_dm(child_dentry);
 
@@ -217,10 +217,10 @@ static void assign_comrades_unlocked(struct dentry *child_dentry,
 	mutex_unlock(&cdi->comrade_list_lock);
 }
 
-static struct hmdfs_dentry_comrade *lookup_comrade(struct path lower_path,
-						   const char *d_name,
-						   int dev_id,
-						   unsigned int flags)
+struct hmdfs_dentry_comrade *lookup_comrade(struct path lower_path,
+					    const char *d_name,
+					    int dev_id,
+					    unsigned int flags)
 {
 	struct path path;
 	struct hmdfs_dentry_comrade *comrade = NULL;
@@ -373,7 +373,7 @@ out:
 	return comrade;
 }
 
-static bool is_valid_comrade(struct hmdfs_dentry_info_merge *mdi, umode_t mode)
+bool is_valid_comrade(struct hmdfs_dentry_info_merge *mdi, umode_t mode)
 {
 	if (mdi->type == DT_UNKNOWN) {
 		mdi->type = S_ISDIR(mode) ? DT_DIR : DT_REG;
@@ -432,7 +432,7 @@ out:
 	kfree(ml_work);
 }
 
-static int merge_lookup_async(struct hmdfs_dentry_info_merge *mdi,
+int merge_lookup_async(struct hmdfs_dentry_info_merge *mdi,
 	struct hmdfs_sb_info *sbi, int devid, const char *name,
 	unsigned int flags)
 {
@@ -462,7 +462,7 @@ out:
 	return err;
 }
 
-static char *hmdfs_get_real_dname(struct dentry *dentry, int *devid, int *type)
+char *hmdfs_get_real_dname(struct dentry *dentry, int *devid, int *type)
 {
 	char *rname;
 
@@ -597,7 +597,7 @@ out:
 }
 
 // mkdir -p
-static void lock_root_inode_shared(struct inode *root, bool *locked, bool *down)
+void lock_root_inode_shared(struct inode *root, bool *locked, bool *down)
 {
 	struct rw_semaphore *sem = &root->i_rwsem;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
@@ -627,7 +627,7 @@ static void lock_root_inode_shared(struct inode *root, bool *locked, bool *down)
 	*locked = true;
 }
 
-static void restore_root_inode_sem(struct inode *root, bool locked, bool down)
+void restore_root_inode_sem(struct inode *root, bool locked, bool down)
 {
 	if (!locked)
 		return;
@@ -739,21 +739,22 @@ struct dentry *hmdfs_lookup_merge(struct inode *parent_inode,
 
 		child_inode = fill_inode_merge(parent_inode->i_sb, parent_inode,
 					       child_dentry, NULL);
+		info = hmdfs_i(child_inode);
+		if (info->inode_type == HMDFS_LAYER_FIRST_MERGE)
+			hmdfs_root_inode_perm_init(child_inode);
+		else
+			check_and_fixup_ownership_remote(parent_inode,
+							 child_inode,
+							 child_dentry);
+
 		ret_dentry = d_splice_alias(child_inode, child_dentry);
 		if (IS_ERR(ret_dentry)) {
 			clear_comrades(child_dentry);
 			err = PTR_ERR(ret_dentry);
 			goto out;
 		}
-		if (ret_dentry) {
+		if (ret_dentry)
 			child_dentry = ret_dentry;
-		}
-		info = hmdfs_i(child_inode);
-		if (info->inode_type == HMDFS_LAYER_FIRST_MERGE)
-			hmdfs_root_inode_perm_init(child_inode);
-		else
-			check_and_fixup_ownership_remote(parent_inode,
-							 child_dentry);
 
 		goto out;
 	}
@@ -762,12 +763,10 @@ struct dentry *hmdfs_lookup_merge(struct inode *parent_inode,
 		err = 0;
 
 out:
-	hmdfs_trace_merge(trace_hmdfs_lookup_merge_end, parent_inode,
-			  child_dentry, err);
 	return err ? ERR_PTR(err) : ret_dentry;
 }
 
-static int hmdfs_getattr_merge(const struct path *path, struct kstat *stat,
+int hmdfs_getattr_merge(const struct path *path, struct kstat *stat,
 			       u32 request_mask, unsigned int flags)
 {
 	int ret;
@@ -788,7 +787,7 @@ out:
 	return ret;
 }
 
-static int hmdfs_setattr_merge(struct dentry *dentry, struct iattr *ia)
+int hmdfs_setattr_merge(struct dentry *dentry, struct iattr *ia)
 {
 	struct inode *inode = d_inode(dentry);
 	struct dentry *lower_dentry = hmdfs_get_fst_lo_d(dentry);
@@ -851,8 +850,8 @@ int do_mkdir_merge(struct inode *parent_inode, struct dentry *child_dentry,
 		ret = PTR_ERR(child_inode);
 		goto out;
 	}
-	child_inode->i_uid = parent_inode->i_uid;
-	child_inode->i_gid = parent_inode->i_gid;
+	check_and_fixup_ownership_remote(parent_inode, child_inode,
+					 child_dentry);
 
 	d_add(child_dentry, child_inode);
 	/* nlink should be increased with the joining of children */
@@ -879,8 +878,8 @@ int do_create_merge(struct inode *parent_inode, struct dentry *child_dentry,
 		ret = PTR_ERR(child_inode);
 		goto out;
 	}
-	child_inode->i_uid = parent_inode->i_uid;
-	child_inode->i_gid = parent_inode->i_gid;
+	check_and_fixup_ownership_remote(parent_inode, child_inode,
+					 child_dentry);
 
 	d_add(child_dentry, child_inode);
 	/* nlink should be increased with the joining of children */
@@ -976,6 +975,8 @@ int hmdfs_create_lower_dentry(struct inode *i_parent, struct dentry *d_child,
 	} else {
 		link_comrade_unlocked(d_child, new_comrade);
 	}
+
+	update_inode_attr(d_inode(d_child), d_child);
 
 out_put:
 	done_path_create(&path, lo_d_child);
@@ -1160,6 +1161,7 @@ int hmdfs_rmdir_merge(struct inode *dir, struct dentry *dentry)
 		goto out;
 	}
 
+	hmdfs_update_meta(dir);
 	d_drop(dentry);
 out:
 	hmdfs_trace_merge(trace_hmdfs_rmdir_merge, dir, dentry, ret);
@@ -1173,6 +1175,7 @@ int do_unlink_merge(struct inode *dir, struct dentry *dentry)
 	struct hmdfs_dentry_comrade *comrade = NULL;
 	struct dentry *lo_d = NULL;
 	struct dentry *lo_d_dir = NULL;
+	struct dentry *lo_d_lookup = NULL;
 	struct inode *lo_i_dir = NULL;
 
 	wait_event(dim->wait_queue, !has_merge_lookup_work(dim));
@@ -1180,12 +1183,23 @@ int do_unlink_merge(struct inode *dir, struct dentry *dentry)
 	mutex_lock(&dim->comrade_list_lock);
 	list_for_each_entry(comrade, &(dim->comrade_list), list) {
 		lo_d = comrade->lo_d;
-                dget(lo_d);
+		dget(lo_d);
 		lo_d_dir = lock_parent(lo_d);
+		/* lo_d could be unhashed, need to lookup again here */
+		lo_d_lookup = lookup_one_len(lo_d->d_name.name, lo_d_dir,
+					     strlen(lo_d->d_name.name));
+		if (IS_ERR(lo_d_lookup)) {
+			ret = PTR_ERR(lo_d_lookup);
+			hmdfs_err("lookup_one_len failed, err = %d", ret);
+			unlock_dir(lo_d_dir);
+			dput(lo_d);
+			break;
+		}
 		lo_i_dir = d_inode(lo_d_dir);
-		ret = vfs_unlink(lo_i_dir, lo_d, NULL); // lo_d GET
+		ret = vfs_unlink(lo_i_dir, lo_d_lookup, NULL);
+		dput(lo_d_lookup);
 		unlock_dir(lo_d_dir);
-                dput(lo_d);
+		dput(lo_d);
 		if (ret)
 			break;
 	}
@@ -1207,6 +1221,8 @@ int hmdfs_unlink_merge(struct inode *dir, struct dentry *dentry)
 	if (ret) {
 		hmdfs_err("unlink failed:%d", ret);
 		goto out;
+	} else {
+		hmdfs_update_meta(dir);
 	}
 
 	d_drop(dentry);
@@ -1276,8 +1292,10 @@ int do_rename_merge(struct inode *old_dir, struct dentry *old_dentry,
 		else
 			lo_d_new = kern_path_create(AT_FDCWD, abs_path_buf,
 						    &lo_p_new, 0);
-		if (IS_ERR(lo_d_new))
-			continue;
+		if (IS_ERR(lo_d_new)) {
+			ret = PTR_ERR(lo_d_new);
+			goto out;
+		}
 
 		lo_d_new_dir = dget_parent(lo_d_new);
 		lo_i_new_dir = d_inode(lo_d_new_dir);
@@ -1321,6 +1339,13 @@ int hmdfs_rename_merge(struct inode *old_dir, struct dentry *old_dentry,
 		ret = -EACCES;
 		goto rename_out;
 	}
+
+	if (hmdfs_i(old_dir)->inode_type != hmdfs_i(new_dir)->inode_type) {
+		hmdfs_err("in different view");
+		ret = -EPERM;
+		goto rename_out;
+	}
+
 	old_dir_buf = kmalloc(PATH_MAX, GFP_KERNEL);
 	new_dir_buf = kmalloc(PATH_MAX, GFP_KERNEL);
 	if (!old_dir_buf || !new_dir_buf) {
@@ -1361,7 +1386,6 @@ int hmdfs_rename_merge(struct inode *old_dir, struct dentry *old_dentry,
 		d_invalidate(old_dentry);
 
 rename_out:
-	hmdfs_trace_rename_merge(old_dir, old_dentry, new_dir, new_dentry, ret);
 	kfree(old_dir_buf);
 	kfree(new_dir_buf);
 	return ret;

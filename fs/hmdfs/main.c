@@ -93,11 +93,7 @@ static int hmdfs_xattr_remote_get(struct dentry *dentry, const char *name,
 	kfree(send_buf);
 	return res;
 }
-/**
-int (*get)(const struct xattr_handler *handler, struct dentry *dentry,
-		   struct inode *inode, const char *name, void *buffer,
-		   size_t size, int flags);
-**/
+
 static int hmdfs_xattr_get(const struct xattr_handler *handler,
 			   struct dentry *dentry, struct inode *inode,
 			   const char *name, void *value, size_t size, int flags)
@@ -181,11 +177,6 @@ out:
 	return err;
 }
 
-/**
-int (*set)(const struct xattr_handler *handler, struct dentry *dentry,
-		   struct inode *inode, const char *name, const void *buffer,
-		   size_t size, int flags);
-**/		   
 static int hmdfs_xattr_set(const struct xattr_handler *handler,
 			   struct dentry *dentry, struct inode *inode,
 			   const char *name, const void *value,
@@ -206,7 +197,8 @@ static int hmdfs_xattr_set(const struct xattr_handler *handler,
 
 	if (info->inode_type == HMDFS_LAYER_OTHER_LOCAL)
 		return hmdfs_xattr_local_set(dentry, name, value, size, flags);
-	else if (info->inode_type == HMDFS_LAYER_OTHER_MERGE)
+	else if (info->inode_type == HMDFS_LAYER_OTHER_MERGE ||
+		 info->inode_type == HMDFS_LAYER_OTHER_MERGE_CLOUD)
 		return hmdfs_xattr_merge_set(dentry, name, value, size, flags);
 
 	return hmdfs_xattr_remote_set(dentry, name, value, size, flags);
@@ -281,6 +273,7 @@ void hmdfs_put_super(struct super_block *sb)
 	kfree(sbi->local_dst);
 	kfree(sbi->real_dst);
 	kfree(sbi->cache_dir);
+	kfree(sbi->cloud_dir);
 	kfifo_free(&sbi->notify_fifo);
 	sb->s_fs_info = NULL;
 	sbi->lower_sb = NULL;
@@ -335,8 +328,7 @@ static int hmdfs_remote_statfs(struct dentry *dentry, struct kstatfs *buf)
 	}
 	mutex_lock(&sbi->connections.node_lock);
 	list_for_each_entry(con, &sbi->connections.node_list, list) {
-		if (con->status == NODE_STAT_ONLINE &&
-		    con->version > USERSPACE_MAX_VER) {
+		if (con->status == NODE_STAT_ONLINE) {
 			peer_get(con);
 			mutex_unlock(&sbi->connections.node_lock);
 			hmdfs_debug("send MSG to remote devID %llu",
@@ -407,6 +399,8 @@ static int hmdfs_show_options(struct seq_file *m, struct dentry *root)
 		seq_printf(m, ",cache_dir=%s", sbi->cache_dir);
 	if (sbi->real_dst)
 		seq_printf(m, ",real_dst=%s", sbi->real_dst);
+	if (sbi->cloud_dir)
+		seq_printf(m, ",cloud_dir=%s", sbi->cloud_dir);
 
 	seq_printf(m, ",%soffline_stash", sbi->s_offline_stash ? "" : "no_");
 	seq_printf(m, ",%sdentry_cache", sbi->s_dentry_cache ? "" : "no_");
@@ -848,6 +842,9 @@ static int hmdfs_fill_super(struct super_block *sb, void *data, int silent)
 	char ctrl_path[CTRL_PATH_MAX_LEN];
 	uint64_t ctrl_hash;
 
+	if (!raw_data)
+		return -EINVAL;
+
 	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
 	if (!sbi) {
 		err = -ENOMEM;
@@ -969,6 +966,7 @@ out_freesbi:
 		kfree(sbi->local_dst);
 		kfree(sbi->real_dst);
 		kfree(sbi->cache_dir);
+		kfree(sbi->cloud_dir);
 		kfree(sbi->s_server_statis);
 		kfree(sbi->s_client_statis);
 		kfree(sbi);

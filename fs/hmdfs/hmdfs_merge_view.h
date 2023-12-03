@@ -59,6 +59,15 @@ struct hmdfs_recursive_para {
 	bool want_excl;
 	const char *name;
 };
+
+struct hmdfs_rename_para {
+	struct inode *old_dir;
+	struct dentry *old_dentry;
+	struct inode *new_dir;
+	struct dentry *new_dentry;
+	unsigned int flags;
+};
+
 static inline struct hmdfs_dentry_info_merge *hmdfs_dm(struct dentry *dentry)
 {
 	return dentry->d_fsdata;
@@ -74,14 +83,57 @@ static inline bool comrade_is_local(struct hmdfs_dentry_comrade *comrade)
 	return comrade->dev_id == HMDFS_DEVID_LOCAL;
 }
 
-struct dentry *hmdfs_lookup_merge(struct inode *parent_inode,
+struct hmdfs_cache_entry *allocate_entry(const char *name, int namelen,
+					 int d_type);
+
+struct dentry *hmdfs_lookup_cloud_merge(struct inode *parent_inode,
 				  struct dentry *child_dentry,
 				  unsigned int flags);
 
-struct hmdfs_dentry_comrade *alloc_comrade(struct dentry *lo_d, int dev_id);
+struct dentry *hmdfs_lookup_merge(struct inode *parent_inode,
+				  struct dentry *child_dentry,
+				  unsigned int flags);
+struct hmdfs_file_info *
+get_next_hmdfs_file_info(struct hmdfs_file_info *fi_head, int device_id);
 
+struct hmdfs_file_info *get_hmdfs_file_info(struct hmdfs_file_info *fi_head,
+					    int device_id);
+int insert_filename(struct rb_root *root, struct hmdfs_cache_entry **new_entry);
+struct hmdfs_dentry_comrade *alloc_comrade(struct dentry *lo_d, int dev_id);
+int check_filename(const char *name, int len);
+int init_hmdfs_dentry_info_merge(struct hmdfs_sb_info *sbi,
+	struct dentry *dentry);
+void hmdfs_init_recursive_para(struct hmdfs_recursive_para *rec_op_para,
+			       int opcode, mode_t mode, bool want_excl,
+			       const char *name);
 void link_comrade(struct list_head *onstack_comrades_head,
 		  struct hmdfs_dentry_comrade *comrade);
+void update_inode_attr(struct inode *inode, struct dentry *child_dentry);
+int get_num_comrades(struct dentry *dentry);
+void assign_comrades_unlocked(struct dentry *child_dentry,
+			      struct list_head *onstack_comrades_head);
+struct hmdfs_dentry_comrade *lookup_comrade(struct path lower_path,
+					    const char *d_name,
+					    int dev_id,
+					    unsigned int flags);
+bool is_valid_comrade(struct hmdfs_dentry_info_merge *mdi, umode_t mode);
+int merge_lookup_async(struct hmdfs_dentry_info_merge *mdi,
+		       struct hmdfs_sb_info *sbi, int devid,
+		       const char *name, unsigned int flags);
+char *hmdfs_get_real_dname(struct dentry *dentry, int *devid, int *type);
+void lock_root_inode_shared(struct inode *root, bool *locked, bool *down);
+void restore_root_inode_sem(struct inode *root, bool locked, bool down);
+int hmdfs_getattr_merge(const struct path *path, struct kstat *stat,
+			u32 request_mask, unsigned int flags);
+int hmdfs_setattr_merge(struct dentry *dentry, struct iattr *ia);
+int hmdfs_rmdir_merge(struct inode *dir, struct dentry *dentry);
+int hmdfs_unlink_merge(struct inode *dir, struct dentry *dentry);
+int hmdfs_rename_merge(struct inode *old_dir, struct dentry *old_dentry,
+		       struct inode *new_dir, struct dentry *new_dentry,
+		       unsigned int flags);
+int do_rename_merge(struct inode *old_dir, struct dentry *old_dentry,
+		    struct inode *new_dir, struct dentry *new_dentry,
+		    unsigned int flags);
 
 static inline void destroy_comrade(struct hmdfs_dentry_comrade *comrade)
 {
@@ -134,6 +186,8 @@ static inline bool is_merge_lookup_end(struct hmdfs_dentry_info_merge *mdi)
 	return ret;
 }
 
+void hmdfs_update_meta(struct inode *dir);
+
 #define for_each_comrade_locked(_dentry, _comrade)                             \
 	list_for_each_entry(_comrade, &(hmdfs_dm(_dentry)->comrade_list), list)
 
@@ -152,23 +206,6 @@ static inline bool is_merge_lookup_end(struct hmdfs_dentry_info_merge *mdi)
 		}                                                              \
 	}
 
-#define hmdfs_trace_rename_merge(olddir, olddentry, newdir, newdentry, err)    \
-	{                                                                      \
-		struct hmdfs_dentry_comrade *comrade;                          \
-		trace_hmdfs_rename_merge(olddir, olddentry, newdir, newdentry, \
-					 err);                                 \
-		mutex_lock(&hmdfs_dm(olddentry)->comrade_list_lock);           \
-		for_each_comrade_locked(olddentry, comrade)                    \
-			trace_hmdfs_show_comrade(olddentry, comrade->lo_d,     \
-						 comrade->dev_id);             \
-		mutex_unlock(&hmdfs_dm(olddentry)->comrade_list_lock);         \
-		mutex_lock(&hmdfs_dm(newdentry)->comrade_list_lock);           \
-		for_each_comrade_locked(newdentry, comrade)                    \
-			trace_hmdfs_show_comrade(newdentry, comrade->lo_d,     \
-						 comrade->dev_id);             \
-		mutex_unlock(&hmdfs_dm(newdentry)->comrade_list_lock);         \
-	}
-
 /*****************************************************************************
  * Helper functions abstarcting out comrade
  *****************************************************************************/
@@ -176,7 +213,9 @@ static inline bool is_merge_lookup_end(struct hmdfs_dentry_info_merge *mdi)
 static inline bool hmdfs_i_merge(struct hmdfs_inode_info *hii)
 {
 	__u8 t = hii->inode_type;
-	return t == HMDFS_LAYER_FIRST_MERGE || t == HMDFS_LAYER_OTHER_MERGE;
+	return t == HMDFS_LAYER_FIRST_MERGE || t == HMDFS_LAYER_OTHER_MERGE ||
+	       t == HMDFS_LAYER_FIRST_MERGE_CLOUD ||
+	       t == HMDFS_LAYER_OTHER_MERGE_CLOUD;
 }
 
 struct dentry *hmdfs_get_lo_d(struct dentry *dentry, int dev_id);
@@ -190,6 +229,8 @@ extern const struct inode_operations hmdfs_file_iops_merge;
 extern const struct file_operations hmdfs_file_fops_merge;
 extern const struct inode_operations hmdfs_dir_iops_merge;
 extern const struct file_operations hmdfs_dir_fops_merge;
+extern const struct inode_operations hmdfs_file_iops_cloud_merge;
+extern const struct inode_operations hmdfs_dir_iops_cloud_merge;
 extern const struct dentry_operations hmdfs_dops_merge;
 
 /*****************************************************************************

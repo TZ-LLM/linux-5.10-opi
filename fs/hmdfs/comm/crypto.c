@@ -20,13 +20,15 @@ static void tls_crypto_set_key(struct connection *conn_impl, int tx)
 {
 	int rc = 0;
 	struct tcp_handle *tcp = conn_impl->connect_handle;
-	struct tls_context *ctx = tls_get_ctx(tcp->sock->sk);
+	struct tls_context *ctx = NULL;
 	struct cipher_context *cctx = NULL;
 	struct tls_sw_context_tx *sw_ctx_tx = NULL;
 	struct tls_sw_context_rx *sw_ctx_rx = NULL;
 	struct crypto_aead **aead = NULL;
 	struct tls12_crypto_info_aes_gcm_128 *crypto_info = NULL;
 
+	lock_sock(tcp->sock->sk);
+	ctx = tls_get_ctx(tcp->sock->sk);
 	if (tx) {
 		crypto_info = &conn_impl->send_crypto_info;
 		cctx = &ctx->tx;
@@ -48,6 +50,7 @@ static void tls_crypto_set_key(struct connection *conn_impl, int tx)
 				TLS_CIPHER_AES_GCM_128_KEY_SIZE);
 	if (rc)
 		hmdfs_err("crypto set key error");
+	release_sock(tcp->sock->sk);
 }
 
 int tls_crypto_info_init(struct connection *conn_impl)
@@ -56,7 +59,7 @@ int tls_crypto_info_init(struct connection *conn_impl)
 	u8 key_meterial[HMDFS_KEY_SIZE];
 	struct tcp_handle *tcp =
 		(struct tcp_handle *)(conn_impl->connect_handle);
-	if (conn_impl->node->version < DFS_2_0 || !tcp)
+	if (!tcp)
 		return -EINVAL;
 	// send
 	update_key(conn_impl->send_key, key_meterial, HKDF_TYPE_IV);
@@ -175,10 +178,9 @@ static int tls_set_rx(struct tcp_handle *tcp)
 int set_crypto_info(struct connection *conn_impl, int set_type)
 {
 	int ret = 0;
-	__u8 version = conn_impl->node->version;
 	struct tcp_handle *tcp =
 		(struct tcp_handle *)(conn_impl->connect_handle);
-	if (version < DFS_2_0 || !tcp)
+	if (!tcp)
 		return -EINVAL;
 
 	if (set_type == SET_CRYPTO_SEND) {
