@@ -94,6 +94,22 @@ static int hmdfs_xattr_remote_get(struct dentry *dentry, const char *name,
 	return res;
 }
 
+static int hmdfs_xattr_merge_get(struct dentry *dentry, const char *name,
+				 void *value, size_t size)
+{
+	int err = 0;
+	struct dentry *lower_dentry = hmdfs_get_lo_d(dentry, HMDFS_DEVID_LOCAL);
+
+	if (!lower_dentry) {
+		err = -EOPNOTSUPP;
+		goto out;
+	}
+	err = hmdfs_xattr_local_get(lower_dentry, name, value, size);
+out:
+	dput(lower_dentry);
+	return err;
+}
+
 static int hmdfs_xattr_get(const struct xattr_handler *handler,
 			   struct dentry *dentry, struct inode *inode,
 			   const char *name, void *value, size_t size, int flags)
@@ -113,8 +129,13 @@ static int hmdfs_xattr_get(const struct xattr_handler *handler,
 
 	if (info->inode_type == HMDFS_LAYER_OTHER_LOCAL)
 		res = hmdfs_xattr_local_get(dentry, name, value, r_size);
-	else
+	else if (info->inode_type == HMDFS_LAYER_OTHER_REMOTE)
 		res = hmdfs_xattr_remote_get(dentry, name, value, r_size);
+	else if (info->inode_type == HMDFS_LAYER_OTHER_MERGE ||
+		 info->inode_type == HMDFS_LAYER_OTHER_MERGE_CLOUD)
+		res = hmdfs_xattr_merge_get(dentry, name, value, r_size);
+	else
+		res = -EOPNOTSUPP;
 
 	if (res == -ERANGE && r_size != size) {
 		hmdfs_info("no support xattr value size over than: %d",
@@ -132,12 +153,14 @@ static int hmdfs_xattr_local_set(struct dentry *dentry, const char *name,
 	int res = 0;
 
 	hmdfs_get_lower_path(dentry, &lower_path);
+	kuid_t tmp_uid = hmdfs_override_inode_uid(d_inode(lower_path.dentry));
 	if (value) {
 		res = vfs_setxattr(lower_path.dentry, name, value, size, flags);
 	} else {
 		WARN_ON(flags != XATTR_REPLACE);
 		res = vfs_removexattr(lower_path.dentry, name);
 	}
+	hmdfs_revert_inode_uid(d_inode(lower_path.dentry), tmp_uid);
 
 	hmdfs_put_lower_path(&lower_path);
 	return res;
@@ -187,9 +210,6 @@ static int hmdfs_xattr_set(const struct xattr_handler *handler,
 	if (!hmdfs_support_xattr(dentry))
 		return -EOPNOTSUPP;
 
-	if (strncmp(name, XATTR_USER_PREFIX, XATTR_USER_PREFIX_LEN))
-		return -EOPNOTSUPP;
-
 	if (size > HMDFS_XATTR_SIZE_MAX) {
 		hmdfs_info("no support too long xattr value: %zu", size);
 		return -E2BIG;
@@ -197,11 +217,13 @@ static int hmdfs_xattr_set(const struct xattr_handler *handler,
 
 	if (info->inode_type == HMDFS_LAYER_OTHER_LOCAL)
 		return hmdfs_xattr_local_set(dentry, name, value, size, flags);
+	else if (info->inode_type == HMDFS_LAYER_OTHER_REMOTE)
+		return hmdfs_xattr_remote_set(dentry, name, value, size, flags);
 	else if (info->inode_type == HMDFS_LAYER_OTHER_MERGE ||
 		 info->inode_type == HMDFS_LAYER_OTHER_MERGE_CLOUD)
 		return hmdfs_xattr_merge_set(dentry, name, value, size, flags);
 
-	return hmdfs_xattr_remote_set(dentry, name, value, size, flags);
+	return -EOPNOTSUPP;
 }
 
 const struct xattr_handler hmdfs_xattr_handler = {
@@ -719,6 +741,7 @@ static int hmdfs_init_sbi(struct hmdfs_sb_info *sbi)
 			  HMDFS_FEATURE_READPAGES_OPEN |
 			  HMDFS_ATOMIC_OPEN;
 	sbi->s_merge_switch = false;
+	sbi->s_cloud_disk_switch = false;
 	sbi->dcache_threshold = DEFAULT_DCACHE_THRESHOLD;
 	sbi->dcache_precision = DEFAULT_DCACHE_PRECISION;
 	sbi->dcache_timeout = DEFAULT_DCACHE_TIMEOUT;
@@ -729,6 +752,7 @@ static int hmdfs_init_sbi(struct hmdfs_sb_info *sbi)
 	sbi->s_offline_stash = true;
 	sbi->s_dentry_cache = true;
 	sbi->wb_timeout_ms = HMDFS_DEF_WB_TIMEOUT_MS;
+	sbi->s_readpages_nr = HMDFS_READPAGES_NR_DEF;
 	/* Initialize before hmdfs_register_sysfs() */
 	atomic_set(&sbi->connections.conn_seq, 0);
 	mutex_init(&sbi->connections.node_lock);
@@ -912,7 +936,7 @@ static int hmdfs_fill_super(struct super_block *sb, void *data, int silent)
 		err = -EINVAL;
 		goto out_sput;
 	}
-	root_inode = fill_root_inode(sb, d_inode(lower_path.dentry));
+	root_inode = fill_root_inode(sb, sbi, d_inode(lower_path.dentry));
 	if (IS_ERR(root_inode)) {
 		err = PTR_ERR(root_inode);
 		goto out_sput;
@@ -957,6 +981,7 @@ out_unreg_sysfs:
 out_freesbi:
 	if (sbi) {
 		sb->s_fs_info = NULL;
+		hmdfs_clear_share_table(sbi);
 		hmdfs_exit_stash(sbi);
 		hmdfs_destroy_writeback(sbi);
 		hmdfs_destroy_server_writeback(sbi);

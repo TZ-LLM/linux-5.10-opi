@@ -283,10 +283,11 @@ static char *hmdfs_merge_dentry_path_raw(struct dentry *d, char *buf, int buflen
 	unsigned int len;
 	unsigned int seq = 0;
 	int error = 0;
-	struct hmdfs_dentry_info_merge *mdi = hmdfs_dm(d);
+	struct hmdfs_dentry_info_merge *mdi = NULL;
 
 	rcu_read_lock();
 restart:
+	mdi = hmdfs_dm(d);
 	dentry = d;
 	end = buf + buflen;
 	len = buflen;
@@ -381,21 +382,32 @@ char *hmdfs_get_dentry_absolute_path(const char *rootdir,
 char *hmdfs_connect_path(const char *path, const char *name)
 {
 	char *buf = 0;
+	size_t path_len, name_len;
 
 	if (!path || !name)
 		return NULL;
 
-	if (strlen(path) + strlen(name) + 1 >= PATH_MAX)
+	path_len = strnlen(path, PATH_MAX);
+	name_len = strnlen(name, PATH_MAX);
+	if (path_len + name_len + 1 >= PATH_MAX)
 		return NULL;
 
 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
 	if (!buf)
 		return NULL;
 
-	strcpy(buf, path);
+	strncpy(buf, path, path_len);
 	strcat(buf, "/");
-	strcat(buf, name);
+	strncat(buf, name, name_len);
 	return buf;
+}
+
+int hmdfs_metainfo_read_nocred(struct file *filp,
+		void *buffer, int size, int bidx)
+{
+	loff_t pos = get_dentry_group_pos(bidx);
+
+	return kernel_read(filp, buffer, (size_t)size, &pos);
 }
 
 int hmdfs_metainfo_read(struct hmdfs_sb_info *sbi, struct file *filp,
@@ -637,6 +649,7 @@ struct hmdfs_dentry_group *find_dentry_page(struct hmdfs_sb_info *sbi,
 	size = cache_file_read(sbi, filp, dentry_blk, (size_t)DENTRYGROUP_SIZE,
 			       &pos);
 	if (size != DENTRYGROUP_SIZE) {
+		hmdfs_unlock_file(filp, pos, DENTRYGROUP_SIZE);
 		kfree(dentry_blk);
 		dentry_blk = NULL;
 	}

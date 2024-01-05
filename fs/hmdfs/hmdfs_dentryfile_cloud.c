@@ -37,14 +37,16 @@ static struct hmdfs_dentry_group_cloud *find_dentry_page(struct hmdfs_sb_info *s
 
 	err = hmdfs_wlock_file(filp, pos, DENTRYGROUP_SIZE);
 	if (err) {
-		hmdfs_err("lock file pos %lld failed", pos);
+		hmdfs_err("lock file pos %lld failed %d", pos, err);
 		kfree(dentry_blk);
 		return NULL;
 	}
 
-	size = cache_file_read(sbi, filp, dentry_blk, (size_t)DENTRYGROUP_SIZE,
+	size = kernel_read(filp, dentry_blk, (size_t)DENTRYGROUP_SIZE,
 			       &pos);
 	if (size != DENTRYGROUP_SIZE) {
+		hmdfs_err("read pos %lld failed %d", pos, size);
+		hmdfs_unlock_file(filp, pos, DENTRYGROUP_SIZE);
 		kfree(dentry_blk);
 		dentry_blk = NULL;
 	}
@@ -65,6 +67,7 @@ find_in_block(struct hmdfs_dentry_group_cloud *dentry_blk, __u32 namehash,
 		if (!test_bit_le(bit_pos, dentry_blk->bitmap)) {
 			bit_pos++;
 			max_len++;
+			continue;
 		}
 		de = &dentry_blk->nsl[bit_pos];
 		if (unlikely(!de->namelen)) {

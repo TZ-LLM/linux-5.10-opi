@@ -108,6 +108,7 @@ extern const struct file_operations hmdfs_dev_dir_ops_remote;
 extern const struct inode_operations hmdfs_dev_file_iops_cloud;
 extern const struct file_operations hmdfs_dev_file_fops_cloud;
 extern const struct address_space_operations hmdfs_dev_file_aops_cloud;
+extern const struct address_space_operations hmdfs_aops_cloud;
 extern const struct inode_operations hmdfs_dev_dir_inode_ops_cloud;
 extern const struct file_operations hmdfs_dev_dir_ops_cloud;
 extern int hmdfs_dev_unlink_from_con(struct hmdfs_peer *conn,
@@ -182,7 +183,7 @@ void hmdfs_set_time(struct dentry *dentry, unsigned long time);
 struct inode *fill_inode_local(struct super_block *sb,
 			       struct inode *lower_inode, const char *name);
 struct inode *fill_root_inode(struct super_block *sb,
-			      struct inode *lower_inode);
+			      struct hmdfs_sb_info *sbi, struct inode *lower_inode);
 struct inode *fill_device_inode(struct super_block *sb,
 				struct inode *lower_inode);
 struct hmdfs_lookup_ret *hmdfs_lookup_by_con(struct hmdfs_peer *con,
@@ -242,7 +243,6 @@ static inline bool hmdfs_support_xattr(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
 	struct hmdfs_inode_info *info = hmdfs_i(inode);
-	struct hmdfs_dentry_info *gdi = hmdfs_d(dentry);
 
 	if (info->inode_type != HMDFS_LAYER_OTHER_LOCAL &&
 	    info->inode_type != HMDFS_LAYER_OTHER_REMOTE &&
@@ -250,10 +250,8 @@ static inline bool hmdfs_support_xattr(struct dentry *dentry)
 	    info->inode_type != HMDFS_LAYER_OTHER_MERGE_CLOUD)
 		return false;
 
-	if (!S_ISREG(inode->i_mode))
-		return false;
-
-	if (hm_islnk(gdi->file_type))
+	if (info->inode_type == HMDFS_LAYER_OTHER_LOCAL &&
+	    hm_islnk(hmdfs_d(dentry)->file_type))
 		return false;
 
 	return true;
