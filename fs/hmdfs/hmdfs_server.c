@@ -118,7 +118,7 @@ struct file *hmdfs_open_path(struct hmdfs_sb_info *sbi, const char *path)
 		hmdfs_info("kern_path failed: %d", err);
 		return ERR_PTR(err);
 	}
-	file = file_open_root(root_path.dentry, root_path.mnt, path,
+	file = file_open_root(&root_path, path,
 			      O_RDWR | O_LARGEFILE, 0644);
 	path_put(&root_path);
 	if (IS_ERR(file)) {

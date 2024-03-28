@@ -90,7 +90,7 @@ int hmdfs_file_open_cloud(struct inode *inode, struct file *file)
 		return -ENOENT;
 	}
 
-	lower_file = file_open_root(root_path.dentry, root_path.mnt, dir_path,
+	lower_file = file_open_root(&root_path, dir_path,
 			      file->f_flags, file->f_mode);
 	path_put(&root_path);
 	if (IS_ERR(lower_file)) {

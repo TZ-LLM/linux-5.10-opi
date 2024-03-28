@@ -1261,7 +1261,7 @@ static int hmdfs_open_restore_dst_file(struct hmdfs_file_restore_ctx *ctx,
 		goto out;
 
 	/* Error comes from connection or server ? */
-	dst = file_open_root(ctx->dst_root_path.dentry, ctx->dst_root_path.mnt,
+	dst = file_open_root(&ctx->dst_root_path,
 			     ctx->dst, O_LARGEFILE | rw_flag, 0);
 	if (IS_ERR(dst)) {
 		err = PTR_ERR(dst);

@@ -1073,7 +1073,7 @@ struct file *create_local_dentry_file_cache(struct hmdfs_sb_info *sbi)
 		goto out;
 	}
 
-	filp = file_open_root(cache_dir.dentry, cache_dir.mnt, ".",
+	filp = file_open_root(&cache_dir, ".",
 			      O_RDWR | O_LARGEFILE | O_TMPFILE,
 			      DENTRY_FILE_PERM);
 	if (IS_ERR(filp))

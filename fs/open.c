@@ -1180,7 +1180,7 @@ err_out:
 }
 EXPORT_SYMBOL_GPL(filp_open_block);
 
-struct file *file_open_root(struct dentry *dentry, struct vfsmount *mnt,
+struct file *file_open_root(const struct path *root,
 			    const char *filename, int flags, umode_t mode)
 {
 	struct open_flags op;
@@ -1188,7 +1188,7 @@ struct file *file_open_root(struct dentry *dentry, struct vfsmount *mnt,
 	int err = build_open_flags(&how, &op);
 	if (err)
 		return ERR_PTR(err);
-	return do_file_open_root(dentry, mnt, filename, &op);
+	return do_file_open_root(root, filename, &op);
 }
 EXPORT_SYMBOL(file_open_root);
 
