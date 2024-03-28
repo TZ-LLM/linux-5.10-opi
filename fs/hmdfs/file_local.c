@@ -20,6 +20,17 @@
 #include "hmdfs_share.h"
 #include "hmdfs_trace.h"
 
+static inline void update_upper_file(struct file *upper_file, struct file *lower_file)
+{
+	loff_t upper_size = i_size_read(upper_file->f_inode);
+	loff_t lower_size = i_size_read(lower_file->f_inode);
+
+	if (upper_file->f_inode->i_mapping && upper_size != lower_size) {
+		i_size_write(upper_file->f_inode, lower_size);
+		truncate_inode_pages(upper_file->f_inode->i_mapping, 0);
+	}
+}
+
 int hmdfs_file_open_local(struct inode *inode, struct file *file)
 {
 	int err = 0;
@@ -36,7 +47,12 @@ int hmdfs_file_open_local(struct inode *inode, struct file *file)
 	}
 
 	hmdfs_get_lower_path(file->f_path.dentry, &lower_path);
-	lower_file = dentry_open(&lower_path, file->f_flags, cred);
+	if (inode->i_mapping != NULL &&
+	    inode->i_mapping->a_ops == &hmdfs_aops_cloud)
+		lower_file = dentry_open(&lower_path, file->f_flags | O_DIRECT,
+					 cred);
+	else
+		lower_file = dentry_open(&lower_path, file->f_flags, cred);
 	hmdfs_put_lower_path(&lower_path);
 	if (IS_ERR(lower_file)) {
 		err = PTR_ERR(lower_file);
@@ -44,6 +60,7 @@ int hmdfs_file_open_local(struct inode *inode, struct file *file)
 	} else {
 		gfi->lower_file = lower_file;
 		file->private_data = gfi;
+		update_upper_file(file, lower_file);
 		if (file->f_flags & (O_RDWR | O_WRONLY))
 			atomic_inc(&info->write_opened);
 	}
@@ -86,11 +103,13 @@ ssize_t hmdfs_do_read_iter(struct file *file, struct iov_iter *iter,
 	if (!iov_iter_count(iter))
 		return 0;
 
-	if (file->f_inode->i_mapping->a_ops == &hmdfs_aops_cloud) {
+	if (file->f_inode->i_mapping != NULL &&
+	    file->f_inode->i_mapping->a_ops == &hmdfs_aops_cloud) {
 		iocb = container_of(ppos, struct kiocb, ki_pos);
 		ret = generic_file_read_iter(iocb, iter);
-	} else
+	} else {
 		ret = vfs_iter_read(lower_file, iter, ppos, 0);
+	}
 	hmdfs_file_accessed(file);
 
 	return ret;
