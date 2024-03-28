@@ -511,7 +511,12 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
 	 */
 	cred = current_cred();
 	tcred = get_task_cred(task);
+#ifdef CONFIG_HYPERHOLD
+	if (!uid_eq(cred->euid, GLOBAL_MEMMGR_UID) &&
+	    !uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+#else
 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+#endif
 	    !uid_eq(cred->euid, tcred->uid) &&
 	    !uid_eq(cred->euid, tcred->suid) &&
 	    !ns_capable(tcred->user_ns, CAP_SYS_NICE))

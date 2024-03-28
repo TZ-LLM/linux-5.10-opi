@@ -1154,14 +1154,23 @@ const char * const vmstat_text[] = {
 	"nr_zone_active_anon",
 	"nr_zone_inactive_file",
 	"nr_zone_active_file",
+#ifdef CONFIG_MEM_PURGEABLE
+	"nr_zone_inactive_purgeable",
+	"nr_zone_active_purgeable",
+#endif
 	"nr_zone_unevictable",
 	"nr_zone_write_pending",
 	"nr_mlock",
 	"nr_page_table_pages",
 	"nr_bounce",
+#if IS_ENABLED(CONFIG_ZSMALLOC)
 	"nr_zspages",
+#endif
 	"nr_free_cma",
 
+#ifdef CONFIG_PAGE_TRACING
+	"nr_skb_pages",
+#endif
 	/* enum numa_stat_item counters */
 #ifdef CONFIG_NUMA
 	"numa_hit",
@@ -1177,6 +1186,10 @@ const char * const vmstat_text[] = {
 	"nr_active_anon",
 	"nr_inactive_file",
 	"nr_active_file",
+#ifdef CONFIG_MEM_PURGEABLE
+	"nr_inactive_purgeable",
+	"nr_active_purgeable",
+#endif
 	"nr_unevictable",
 	"nr_slab_reclaimable",
 	"nr_slab_unreclaimable",
@@ -1351,6 +1364,24 @@ const char * const vmstat_text[] = {
 #ifdef CONFIG_SWAP
 	"swap_ra",
 	"swap_ra_hit",
+#endif
+#ifdef CONFIG_HYPERHOLD_ZSWAPD
+	"zswapd_running",
+	"zswapd_hit_refaults",
+	"zswapd_medium_press",
+	"zswapd_critical_press",
+	"zswapd_memcg_ratio_skip",
+	"zswapd_memcg_refault_skip",
+	"zswapd_swapout",
+	"zswapd_empty_round",
+	"zswapd_empty_round_skip_times",
+	"zswapd_snapshot_times",
+	"zswapd_reclaimed",
+	"zswapd_scanned",
+#endif
+#ifdef CONFIG_HYPERHOLD_MEMCG
+	"freeze_reclaimed",
+	"freeze_reclaim_count",
 #endif
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
 	"speculative_pgfault",
