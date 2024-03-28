@@ -553,6 +553,9 @@ struct binder_thread {
 #ifdef CONFIG_ACCESS_TOKENID
 	struct access_token tokens;
 #endif /* CONFIG_ACCESS_TOKENID */
+#ifdef CONFIG_BINDER_SENDER_INFO
+	__u64 sender_pid_nr;
+#endif /* CONFIG_BINDER_SENDER_INFO */
 };
 
 /**

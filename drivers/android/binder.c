@@ -111,8 +111,16 @@ DEFINE_PROC_SHOW_ATTRIBUTE(binder_transaction_proc);
 #define ENABLE_ACCESS_TOKENID 0
 #endif /* CONFIG_ACCESS_TOKENID */
 
+#ifdef CONFIG_BINDER_SENDER_INFO
+#define ENABLE_BINDER_SENDER_INFO 1
+#else
+#define ENABLE_BINDER_SENDER_INFO 0
+#endif /* CONFIG_BINDER_SENDER_INFO */
+
 #define ACCESS_TOKENID_FEATURE_VALUE (ENABLE_ACCESS_TOKENID << 0)
-#define BINDER_CURRENT_FEATURE_SET ACCESS_TOKENID_FEATURE_VALUE
+#define BINDER_SENDER_INFO_FEATURE_VALUE (ENABLE_BINDER_SENDER_INFO << 2)
+
+#define BINDER_CURRENT_FEATURE_SET (ACCESS_TOKENID_FEATURE_VALUE | BINDER_SENDER_INFO_FEATURE_VALUE)
 
 enum {
 	BINDER_DEBUG_USER_ERROR             = 1U << 0,
@@ -2012,24 +2020,23 @@ static void binder_deferred_fd_close(int fd)
 static void binder_transaction_buffer_release(struct binder_proc *proc,
 					      struct binder_thread *thread,
 					      struct binder_buffer *buffer,
-					      binder_size_t failed_at,
+					      binder_size_t off_end_offset,
 					      bool is_failure)
 {
 	int debug_id = buffer->debug_id;
-	binder_size_t off_start_offset, buffer_offset, off_end_offset;
+	binder_size_t off_start_offset, buffer_offset;
 
 	binder_debug(BINDER_DEBUG_TRANSACTION,
 		     "%d buffer release %d, size %zd-%zd, failed at %llx\n",
 		     proc->pid, buffer->debug_id,
 		     buffer->data_size, buffer->offsets_size,
-		     (unsigned long long)failed_at);
+		     (unsigned long long)off_end_offset);
 
 	if (buffer->target_node)
 		binder_dec_node(buffer->target_node, 1, 0);
 
 	off_start_offset = ALIGN(buffer->data_size, sizeof(void *));
-	off_end_offset = is_failure && failed_at ? failed_at :
-				off_start_offset + buffer->offsets_size;
+
 	for (buffer_offset = off_start_offset; buffer_offset < off_end_offset;
 	     buffer_offset += sizeof(binder_size_t)) {
 		struct binder_object_header *hdr;
@@ -2187,6 +2194,21 @@ static void binder_transaction_buffer_release(struct binder_proc *proc,
 			break;
 		}
 	}
+}
+
+/* Clean up all the objects in the buffer */
+static inline void binder_release_entire_buffer(struct binder_proc *proc,
+						struct binder_thread *thread,
+						struct binder_buffer *buffer,
+						bool is_failure)
+{
+	binder_size_t off_end_offset;
+
+	off_end_offset = ALIGN(buffer->data_size, sizeof(void *));
+	off_end_offset += buffer->offsets_size;
+
+	binder_transaction_buffer_release(proc, thread, buffer,
+					  off_end_offset, is_failure);
 }
 
 static int binder_translate_binder(struct flat_binder_object *fp,
@@ -3439,7 +3461,7 @@ binder_free_buf(struct binder_proc *proc,
 		binder_node_inner_unlock(buf_node);
 	}
 	trace_binder_transaction_buffer_release(buffer);
-	binder_transaction_buffer_release(proc, thread, buffer, 0, is_failure);
+	binder_release_entire_buffer(proc, thread, buffer, is_failure);
 	binder_alloc_free_buf(&proc->alloc, buffer);
 }
 
@@ -4318,8 +4340,18 @@ skip:
 				task_tgid_nr_ns(sender,
 						task_active_pid_ns(current));
 			trace_android_vh_sync_txn_recvd(thread->task, t_from->task);
+#ifdef CONFIG_BINDER_SENDER_INFO
+			binder_inner_proc_lock(thread->proc);
+			thread->sender_pid_nr = task_tgid_nr(sender);
+			binder_inner_proc_unlock(thread->proc);
+#endif
 		} else {
 			trd->sender_pid = 0;
+#ifdef CONFIG_BINDER_SENDER_INFO
+			binder_inner_proc_lock(thread->proc);
+			thread->sender_pid_nr = 0;
+			binder_inner_proc_unlock(thread->proc);
+#endif
 		}
 
 		ret = binder_apply_fd_fixups(proc, t);
@@ -5229,6 +5261,39 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 	}
 #endif /* CONFIG_ACCESS_TOKENID */
+
+#ifdef CONFIG_BINDER_SENDER_INFO
+	case BINDER_GET_SENDER_INFO: {
+		struct binder_sender_info __user *sender = ubuf;
+		u64 token, ftoken, sender_pid_nr;
+		if (size != sizeof(struct binder_sender_info)) {
+			ret = -EINVAL;
+			goto err;
+		}
+		binder_inner_proc_lock(proc);
+#ifdef CONFIG_ACCESS_TOKENID
+		token = thread->tokens.sender_tokenid;
+		ftoken = thread->tokens.first_tokenid;
+#endif /*CONFIG_ACCESS_TOKENID*/
+		sender_pid_nr = thread->sender_pid_nr;
+		binder_inner_proc_unlock(proc);
+#ifdef CONFIG_ACCESS_TOKENID
+		if (put_user(token, &sender->tokens.sender_tokenid)) {
+			ret = -EFAULT;
+			goto err;
+		}
+		if (put_user(ftoken, &sender->tokens.first_tokenid)) {
+			ret = -EFAULT;
+			goto err;
+		}
+#endif /*CONFIG_ACCESS_TOKENID*/
+		if (put_user(sender_pid_nr, &sender->sender_pid_nr)) {
+			ret = -EFAULT;
+			goto err;
+		}
+		break;
+	}
+#endif /* CONFIG_BINDER_SENDER_INFO */
 	default:
 		ret = -EINVAL;
 		goto err;
