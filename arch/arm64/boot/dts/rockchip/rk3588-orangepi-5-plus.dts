@@ -6,6 +6,8 @@
 
 /dts-v1/;
 
+// /memreserve/ 0x60000000 0x10000000;
+
 #include "rk3588-orangepi-5-plus.dtsi"
 #include "rk3588-linux.dtsi"
 #include "rk3588-orangepi-5-plus-lcd.dtsi"
@@ -14,6 +16,24 @@
 / {
 	model = "RK3588 OPi 5 Plus";
 	compatible = "rockchip,rk3588-orangepi-5-plus", "rockchip,rk3588";
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+
+		opentrustee_reserved: opentrustee {
+			no-map;
+			reg = <0x0 0x60000000 0x0 0x60000000>;
+		};
+
+		opentrustee_reserved2: opentrustee2 {
+			no-map;
+			reg = <0x4 0x00000000 0x3 0x00000000>;
+		};
+	};
+
 
 	leds: gpio-leds {
 		compatible = "gpio-leds";

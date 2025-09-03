@@ -2315,7 +2315,7 @@ EXPORT_SYMBOL(dwmac_rk_get_phy_interface);
 /*
  * Create an ethernet address from the system serial number.
  */
-static int __init etherm_addr(char *addr)
+static int etherm_addr(char *addr)
 {
 	unsigned int serial;
 

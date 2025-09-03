@@ -31,6 +31,7 @@
 #include <linux/hugetlb.h>
 #include <linux/acpi_iort.h>
 #include <linux/rk-dma-heap.h>
+#include <linux/cma.h>
 
 #include <asm/boot.h>
 #include <asm/fixmap.h>
@@ -460,6 +461,18 @@ void __init arm64_memblock_init(void)
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
 
+// #define SJC_DMA_4GIB
+#ifdef SJC_DMA_4GIB
+struct cma *xxx_cma;
+#endif
+
+#define TZASC_NR               (4)
+#define TZASC_TOTAL_MEM_SIZE   (9UL * (1UL << 30))
+#define TZASC_PER_CMA_MEM_SIZE (TZASC_TOTAL_MEM_SIZE / TZASC_NR)
+
+char tzasc_cma_name[10];
+struct cma *tzasc_cma[TZASC_NR];
+
 void __init bootmem_init(void)
 {
 	unsigned long min, max;
@@ -499,6 +512,26 @@ void __init bootmem_init(void)
 	 */
 	dma_contiguous_reserve(arm64_dma_phys_limit);
 	rk_dma_heap_cma_setup();
+
+#ifdef SJC_DMA_4GIB
+	int ret;
+	ret = cma_declare_contiguous(0, TZASC_TOTAL_MEM_SIZE, 0x0,
+				     0, 0, 0, "reserved",
+				     &xxx_cma);
+	if (ret != 0) {
+		pr_info("zzh: ERROR: %d\n", ret);
+	} else {
+		pr_info("zzh: cma_declare_contiguous OK\n");
+	}
+#endif
+
+	int ret, i;
+	for (i = 0; i < TZASC_NR; i++) {
+		sprintf(tzasc_cma_name, "tzasc%d", i);
+		ret = cma_declare_contiguous(0, TZASC_PER_CMA_MEM_SIZE, 0x0,
+									 0, 0, 0, tzasc_cma_name,
+									 tzasc_cma + i);
+	}
 
 	/*
 	 * request_standard_resources() depends on crashkernel's memory being

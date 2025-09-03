@@ -535,7 +535,7 @@ static int etherh_addr(char *addr, struct expansion_card *ec)
 /*
  * Create an ethernet address from the system serial number.
  */
-static int __init etherm_addr(char *addr)
+static int etherm_addr(char *addr)
 {
 	unsigned int serial;
 

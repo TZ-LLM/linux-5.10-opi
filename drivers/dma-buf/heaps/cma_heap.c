@@ -249,7 +249,7 @@ static void cma_heap_dma_buf_release(struct dma_buf *dmabuf)
 	}
 
 	/* free page list */
-	kfree(buffer->pages);
+	kvfree(buffer->pages);
 	/* release memory */
 	cma_release(cma_heap->cma, buffer->cma_pages, buffer->pagecount);
 	kfree(buffer);
@@ -322,7 +322,7 @@ static struct dma_buf *cma_heap_allocate(struct dma_heap *heap,
 		memset(page_address(cma_pages), 0, size);
 	}
 
-	buffer->pages = kmalloc_array(pagecount, sizeof(*buffer->pages), GFP_KERNEL);
+	buffer->pages = kvmalloc(pagecount * sizeof(*buffer->pages), GFP_KERNEL);
 	if (!buffer->pages) {
 		ret = -ENOMEM;
 		goto free_cma;
@@ -350,7 +350,7 @@ static struct dma_buf *cma_heap_allocate(struct dma_heap *heap,
 	return dmabuf;
 
 free_pages:
-	kfree(buffer->pages);
+	kvfree(buffer->pages);
 free_cma:
 	cma_release(cma_heap->cma, cma_pages, pagecount);
 free_buffer:
@@ -388,6 +388,7 @@ static int __add_cma_heap(struct cma *cma, void *data)
 	return 0;
 }
 
+// extern struct cma *xxx_cma;
 static int add_default_cma_heap(void)
 {
 	struct cma *default_cma = dev_get_cma_area(NULL);
@@ -395,6 +396,8 @@ static int add_default_cma_heap(void)
 
 	if (default_cma)
 		ret = __add_cma_heap(default_cma, NULL);
+
+	// __add_cma_heap(xxx_cma, NULL);
 
 	return ret;
 }
